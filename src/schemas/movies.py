@@ -87,3 +87,7 @@ class MovieUpdateSchema(BaseModel):
     status: Optional[MovieStatusEnum] = None
     budget: Optional[float] = Field(None, ge=0)
     revenue: Optional[float] = Field(None, ge=0)
+
+
+class MovieUpdateResponseSchema(BaseModel):
+    detail: str

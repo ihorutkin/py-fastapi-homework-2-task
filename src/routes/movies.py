@@ -15,6 +15,7 @@ from schemas.movies import (
     MovieDetailSchema,
     MovieCreateSchema,
     MovieUpdateSchema,
+    MovieUpdateResponseSchema,
 )
 from utils import get_entities
 
@@ -174,7 +175,7 @@ async def delete_movie(movie_id: int, db: Annotated[AsyncSession, Depends(get_db
 
 @router.patch(
     "/movies/{movie_id}/",
-    response_model=MovieDetailSchema,
+    response_model=MovieUpdateResponseSchema,
     status_code=status.HTTP_200_OK,
 )
 async def update_movie(
@@ -204,4 +205,4 @@ async def update_movie(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid input data."
         )
 
-    return movie
+    return {"detail": "Movie updated successfully."}
