@@ -1,7 +1,8 @@
-from datetime import timedelta, date
 from math import ceil
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +16,7 @@ from schemas.movies import (
     MovieCreateSchema,
     MovieUpdateSchema,
 )
+from utils import get_entities
 
 router = APIRouter()
 
@@ -23,19 +25,23 @@ router = APIRouter()
 
 @router.get("/movies/", response_model=MovieListResponseSchema)
 async def get_all_movies(
+    db: Annotated[AsyncSession, Depends(get_db)],
     page: int = Query(1, ge=1),
     per_page: int = Query(10, ge=1, le=20),
-    db: AsyncSession = Depends(get_db),
 ):
     total_items = await db.scalar(select(func.count()).select_from(MovieModel))
 
     if not total_items:
-        raise HTTPException(status_code=404, detail="No movies found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No movies found."
+        )
 
     total_pages = ceil(total_items / per_page)
 
     if page > total_pages:
-        raise HTTPException(status_code=404, detail="No movies found.")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="No movies found."
+        )
 
     result = await db.execute(
         select(MovieModel)
@@ -63,8 +69,12 @@ async def get_all_movies(
     }
 
 
-@router.get("/movies/{movie_id}/", response_model=MovieDetailSchema, status_code=200)
-async def get_movie_by_id(movie_id: int, db: AsyncSession = Depends(get_db)):
+@router.get(
+    "/movies/{movie_id}/",
+    response_model=MovieDetailSchema,
+    status_code=status.HTTP_200_OK,
+)
+async def get_movie_by_id(movie_id: int, db: Annotated[AsyncSession, Depends(get_db)]):
     result = await db.execute(
         select(MovieModel)
         .options(
@@ -79,39 +89,19 @@ async def get_movie_by_id(movie_id: int, db: AsyncSession = Depends(get_db)):
 
     if not movie:
         raise HTTPException(
-            status_code=404, detail="Movie with the given ID was not found."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Movie with the given ID was not found.",
         )
 
     return movie
 
 
-async def get_entities(
-    model,
-    names: list[str],
-    db: AsyncSession,
+@router.post(
+    "/movies/", response_model=MovieDetailSchema, status_code=status.HTTP_201_CREATED
+)
+async def create_movie(
+    payload: MovieCreateSchema, db: Annotated[AsyncSession, Depends(get_db)]
 ):
-    if not names:
-        return []
-    existing = (
-        (await db.execute(select(model).where(model.name.in_(names)))).scalars().all()
-    )
-
-    founds = {obj.name: obj for obj in existing}
-    new_objs = [model(name=name) for name in names if name not in founds]
-
-    for obj in new_objs:
-        db.add(obj)
-    if new_objs:
-        await db.flush()
-
-    return list(founds.values()) + new_objs
-
-
-@router.post("/movies/", response_model=MovieDetailSchema, status_code=201)
-async def create_movie(payload: MovieCreateSchema, db: AsyncSession = Depends(get_db)):
-    if payload.date > date.today() + timedelta(days=365):
-        raise HTTPException(status_code=400, detail="Invalid input data")
-
     duplication = await db.scalar(
         select(MovieModel).where(
             MovieModel.name == payload.name,
@@ -121,7 +111,7 @@ async def create_movie(payload: MovieCreateSchema, db: AsyncSession = Depends(ge
 
     if duplication:
         raise HTTPException(
-            status_code=409,
+            status_code=status.HTTP_409_CONFLICT,
             detail=f"A movie with the name '{payload.name}' and release date '{payload.date}' already exists.",
         )
 
@@ -160,37 +150,45 @@ async def create_movie(payload: MovieCreateSchema, db: AsyncSession = Depends(ge
     except IntegrityError:
         await db.rollback()
         raise HTTPException(
-            status_code=409,
+            status_code=status.HTTP_409_CONFLICT,
             detail="The input data is invalid (e.g., missing required fields, invalid values).",
         )
 
     return new_film
 
 
-@router.delete("/movies/{movie_id}/", status_code=204)
-async def delete_movie(movie_id: int, db: AsyncSession = Depends(get_db)):
+@router.delete("/movies/{movie_id}/", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_movie(movie_id: int, db: Annotated[AsyncSession, Depends(get_db)]):
     result = await db.execute(select(MovieModel).where(MovieModel.id == movie_id))
     movie = result.scalar_one_or_none()
 
     if not movie:
         raise HTTPException(
-            status_code=404, detail="Movie with the given ID was not found."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Movie with the given ID was not found.",
         )
 
     await db.delete(movie)
     await db.commit()
 
 
-@router.patch("/movies/{movie_id}/", status_code=200)
+@router.patch(
+    "/movies/{movie_id}/",
+    response_model=MovieDetailSchema,
+    status_code=status.HTTP_200_OK,
+)
 async def update_movie(
-    movie_id: int, payload: MovieUpdateSchema, db: AsyncSession = Depends(get_db)
+    movie_id: int,
+    payload: MovieUpdateSchema,
+    db: Annotated[AsyncSession, Depends(get_db)],
 ):
     result = await db.execute(select(MovieModel).where(MovieModel.id == movie_id))
     movie = result.scalar_one_or_none()
 
     if not movie:
         raise HTTPException(
-            status_code=404, detail="Movie with the given ID was not found."
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Movie with the given ID was not found.",
         )
 
     update_data = payload.model_dump(exclude_unset=True)
@@ -202,6 +200,8 @@ async def update_movie(
         await db.refresh(movie)
     except IntegrityError:
         await db.rollback()
-        raise HTTPException(status_code=400, detail="Invalid input data.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid input data."
+        )
 
-    return {"detail": "Movie updated successfully."}
+    return movie

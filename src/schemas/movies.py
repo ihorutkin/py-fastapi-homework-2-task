@@ -1,8 +1,8 @@
 # Write your code here
 from typing import Optional
 
-from pydantic import BaseModel, ConfigDict, Field
-from datetime import date
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from datetime import date, timedelta
 
 from database.models import MovieStatusEnum
 
@@ -58,6 +58,13 @@ class MovieCreateSchema(BaseModel):
     genres: list[str]
     actors: list[str]
     languages: list[str]
+
+    @field_validator("date", mode="after")
+    @classmethod
+    def validate_date(cls, payload_date: date):
+        if payload_date > date.today() + timedelta(days=365):
+            raise ValueError("Invalid input data")
+        return payload_date
 
 
 class MovieDetailSchema(MovieListItemSchema):
